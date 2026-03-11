@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import pandas as pd
 from enum import Enum
 from math import exp
 
@@ -36,7 +37,7 @@ class Simulator:
         self.plant = plant
         self.profile = profile
 
-    def run(self, start: float, end: float, dt: float = 0.001) -> SimResult:
+    def run(self, start: float, end: float, dt: float = 0.001) -> pd.DataFrame:
         """
         Simulate a move from start to end position.
 
@@ -54,7 +55,8 @@ class Simulator:
         pm = PlantModel(config=self.plant)
 
         pid = PidController(self.gains)
-        result = SimResult()
+
+        time_data, setpoint_data, actual_data, output_data = [], [], [], []
 
         current_time = 0.0
         settling_time_remaining = 1.0  # Extra time to run after reaching target
@@ -69,17 +71,25 @@ class Simulator:
             torque_command = pid.update(error, dt)
             pm.step(command=torque_command, dt=dt)
 
-            result.time.append(current_time)
-            result.setpoint.append(setpoint)
-            result.actual.append(actual)
-            result.error.append(error)
-            result.output.append(torque_command)
+            time_data.append(current_time)
+            setpoint_data.append(setpoint)
+            actual_data.append(actual)
+            output_data.append(torque_command)
 
             current_time += dt
             if pg.is_finished():
                 settling_time_remaining -= dt
 
-        return result
+        df = pd.DataFrame(
+            {
+                "time": time_data,
+                "setpoint": setpoint_data,
+                "actual": actual_data,
+                "output": output_data,
+            }
+        )
+
+        return df
 
 
 @dataclass
