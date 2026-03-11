@@ -1,2 +1,3 @@
-def hello() -> str:
-    return "Hello from ctrlbench!"
+from ctrlbench.sim import PidGains, PlantConfig, ProfileConfig, SimResult, Simulator
+
+__all__ = ["PidGains", "PlantConfig", "ProfileConfig", "SimResult", "Simulator"]
