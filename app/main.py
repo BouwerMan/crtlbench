@@ -1,6 +1,7 @@
 import streamlit as st
 from ctrlbench.sim import PidGains, PlantConfig, ProfileConfig, Simulator
 from ctrlbench.plot import plot_interactive_dashboard
+from tests import TESTS
 import math
 
 STEP_ANGLE_DEG = 1.8
@@ -8,6 +9,8 @@ RADIANS_PER_STEP = math.radians(STEP_ANGLE_DEG)
 
 st.set_page_config(page_title="PID Tuner", layout="wide")
 
+selected = st.sidebar.selectbox("Test Type", list(TESTS.keys()))
+configure, run = TESTS[selected]
 
 def synced_slider_input(
     label: str,
@@ -112,10 +115,6 @@ kd = synced_slider_input(
 st.sidebar.markdown("---")
 st.sidebar.header("Simulation Settings")
 
-profile_type = st.sidebar.selectbox(
-    "Profile Type", options=["Trapezoidal", "Step Response"]
-)
-
 dt = st.sidebar.number_input(
     "Time Step (dt)",
     min_value=0.00001,
@@ -128,43 +127,8 @@ dt = st.sidebar.number_input(
 gains = PidGains(kp=kp, ki=ki, kd=kd)
 plant = PlantConfig.xy42sth34()
 
-if profile_type == "Trapezoidal":
-    target_steps = st.sidebar.slider(
-        "Target Steps", min_value=100, max_value=50000, value=10000, step=100
-    )
-    vel_steps = st.sidebar.number_input("Cruise Velocity (Steps/s)", value=2000)
-    accel_steps = st.sidebar.number_input("Acceleration (Steps/s^2)", value=5000)
-    max_time = st.sidebar.number_input("Max Sim Time (s)", value=10.0, step=1.0)
-
-    max_vel_rad = vel_steps * RADIANS_PER_STEP
-    accel_rad = accel_steps * RADIANS_PER_STEP
-    profile = ProfileConfig(
-        max_velocity=max_vel_rad, acceleration=accel_rad, deceleration=accel_rad
-    )
-
-    sim = Simulator(gains=gains, plant=plant, profile=profile)
-    df = sim.run(
-        start=0.0, end=target_steps * RADIANS_PER_STEP, dt=dt, max_time=max_time
-    )
-
-else:
-    step_amplitude = st.sidebar.number_input(
-        "Step Amplitude (Steps)", min_value=1, value=10
-    )
-    wave_period = st.sidebar.number_input(
-        "Wave Period (s)", min_value=0.1, value=2.0, step=0.1
-    )
-    sim_duration = st.sidebar.number_input(
-        "Total Sim Duration (s)", min_value=1.0, value=5.0, step=1.0
-    )
-
-    sim = Simulator(gains=gains, plant=plant, profile=None)
-    amplitude_rad = step_amplitude * RADIANS_PER_STEP
-
-    def square_wave(t: float) -> float:
-        return amplitude_rad if (t % wave_period) < (wave_period / 2.0) else 0.0
-
-    df = sim.run_signal(square_wave, duration=sim_duration, dt=dt)
+configure(st.sidebar, plant)
+df = run(gains, plant, dt)
 
 st.sidebar.markdown("---")
 st.sidebar.header("View Settings")
@@ -180,11 +144,6 @@ if lock_axes:
         x_max = st.number_input("X Max (s)", value=2.0, step=0.1)
 else:
     x_min, x_max = None, None
-
-print("Converting radians to steps for plotting")
-df["setpoint"] = df["setpoint"] / RADIANS_PER_STEP
-df["actual"] = df["actual"] / RADIANS_PER_STEP
-df["error"] = df["error"] / RADIANS_PER_STEP
 
 st.title("Stepper Motor PID Tuner")
 initial_setpoint = df["setpoint"].iloc[0]

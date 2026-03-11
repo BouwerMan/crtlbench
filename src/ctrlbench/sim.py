@@ -1,15 +1,17 @@
+import math
 from typing import Callable
 from dataclasses import dataclass, field
 import pandas as pd
 from enum import Enum
 from math import exp
 
-
-# @dataclass
-# class PlantConfig:
-#     response: float = 1.0  # How well the plant tracks commands (0.0–1.0)
-#     disturbance: float = 0.0  # Constant force applied each tick
-
+@dataclass
+class PidGains:
+    kp: float = 0.0
+    ki: float = 0.0
+    kd: float = 0.0
+    integral_limit_max: float = 1000.0
+    integral_limit_min: float = -1000.0
 
 @dataclass
 class ProfileConfig:
@@ -26,16 +28,63 @@ class ProfileConfig:
             deceleration=float("inf"),
         )
 
-
 @dataclass
-class SimResult:
-    time: list[float] = field(default_factory=list)
-    setpoint: list[float] = field(default_factory=list)
-    actual: list[float] = field(default_factory=list)
-    error: list[float] = field(default_factory=list)
-    output: list[float] = field(default_factory=list)
-    integral: list[float] = field(default_factory=list)
+class PlantConfig:
+    rotor_inertia: float
+    peak_torque: float
+    electrical_tau: float
+    viscous_friction: float
+    static_friction: float
+    disturbance: float
+    display_units: str = field(default="rad", repr=False)
+    display_scale: float = field(default=1.0, repr=False)
 
+    @classmethod
+    def simple(cls, inertia: float = 1.0) -> "PlantConfig":
+        """Double integrator, no friction, instant electrical response."""
+        return cls(
+            rotor_inertia=inertia,
+            peak_torque=float("inf"),  # No limit
+            electrical_tau=0.0,  # Instant torque
+            viscous_friction=0.0,
+            static_friction=0.0,
+            disturbance=0.0,
+        )
+
+    @classmethod
+    def from_datasheet(
+        cls, rotor_inertia: float, peak_torque: float, electrical_tau: float
+    ) -> "PlantConfig":
+        """Physical model without non-linear stiction."""
+        return cls(
+            rotor_inertia=rotor_inertia,
+            peak_torque=peak_torque,
+            electrical_tau=electrical_tau,
+            viscous_friction=0.01,  # Small default drag
+            static_friction=0.0,
+            disturbance=0.0,
+        )
+
+    @classmethod
+    def xy42sth34(cls) -> "PlantConfig":
+        """
+        Physical model for the XY42STH34-0354A NEMA 17 Stepper Motor.
+        Units are standard SI (kg*m^2, Nm, Seconds).
+        """
+        
+        STEP_ANGLE_DEG = 1.8
+        RADIANS_PER_STEP = math.radians(STEP_ANGLE_DEG)
+
+        return cls(
+            rotor_inertia=3.5e-6,  # 35 g-cm^2
+            peak_torque=0.157,  # 1.6 kg-cm Holding Torque
+            electrical_tau=0.00097,  # 33mH / 34 Ohms
+            static_friction=0.0118,  # 120 g-cm Detent Torque
+            viscous_friction=0.001,  # Estimated base drag
+            disturbance=0.0,
+            display_units="steps",
+            display_scale=1.0 / RADIANS_PER_STEP,
+        )
 
 class Simulator:
     """
@@ -176,13 +225,7 @@ class Simulator:
         )
 
 
-@dataclass
-class PidGains:
-    kp: float = 0.0
-    ki: float = 0.0
-    kd: float = 0.0
-    integral_limit_max: float = 1000.0
-    integral_limit_min: float = -1000.0
+
 
 
 class PidController:
@@ -230,55 +273,7 @@ class PidController:
         )
 
 
-@dataclass
-class PlantConfig:
-    rotor_inertia: float
-    peak_torque: float
-    electrical_tau: float
-    viscous_friction: float
-    static_friction: float
-    disturbance: float
 
-    @classmethod
-    def simple(cls, inertia: float = 1.0) -> "PlantConfig":
-        """Double integrator, no friction, instant electrical response."""
-        return cls(
-            rotor_inertia=inertia,
-            peak_torque=float("inf"),  # No limit
-            electrical_tau=0.0,  # Instant torque
-            viscous_friction=0.0,
-            static_friction=0.0,
-            disturbance=0.0,
-        )
-
-    @classmethod
-    def from_datasheet(
-        cls, rotor_inertia: float, peak_torque: float, electrical_tau: float
-    ) -> "PlantConfig":
-        """Physical model without non-linear stiction."""
-        return cls(
-            rotor_inertia=rotor_inertia,
-            peak_torque=peak_torque,
-            electrical_tau=electrical_tau,
-            viscous_friction=0.01,  # Small default drag
-            static_friction=0.0,
-            disturbance=0.0,
-        )
-
-    @classmethod
-    def xy42sth34(cls) -> "PlantConfig":
-        """
-        Physical model for the XY42STH34-0354A NEMA 17 Stepper Motor.
-        Units are standard SI (kg*m^2, Nm, Seconds).
-        """
-        return cls(
-            rotor_inertia=3.5e-6,  # 35 g-cm^2
-            peak_torque=0.157,  # 1.6 kg-cm Holding Torque
-            electrical_tau=0.00097,  # 33mH / 34 Ohms
-            static_friction=0.0118,  # 120 g-cm Detent Torque
-            viscous_friction=0.001,  # Estimated base drag
-            disturbance=0.0,
-        )
 
 
 class PlantModel:
