@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
+from math import exp
 
 
 @dataclass
@@ -11,10 +12,10 @@ class PidGains:
     integral_limit_min: float = 1000.0
 
 
-@dataclass
-class PlantConfig:
-    response: float = 1.0  # How well the plant tracks commands (0.0–1.0)
-    disturbance: float = 0.0  # Constant force applied each tick
+# @dataclass
+# class PlantConfig:
+#     response: float = 1.0  # How well the plant tracks commands (0.0–1.0)
+#     disturbance: float = 0.0  # Constant force applied each tick
 
 
 @dataclass
@@ -44,7 +45,7 @@ class Simulator:
         self.plant = plant
         self.profile = profile
 
-    def run(self, start: float, end: float) -> SimResult:
+    def run(self, start: float, end: float, dt: float = 0.001) -> SimResult:
         """
         Simulate a move from start to end position.
 
@@ -67,12 +68,78 @@ class PidController:
     pass
 
 
+@dataclass
+class PlantConfig:
+    rotor_inertia: float
+    peak_torque: float
+    electrical_tau: float
+    viscous_friction: float
+    static_friction: float
+    disturbance: float
+
+    @classmethod
+    def simple(cls, inertia: float = 1.0) -> "PlantConfig":
+        """Double integrator, no friction, instant electrical response."""
+        return cls(
+            rotor_inertia=inertia,
+            peak_torque=float("inf"),  # No limit
+            electrical_tau=0.0,  # Instant torque
+            viscous_friction=0.0,
+            static_friction=0.0,
+            disturbance=0.0,
+        )
+
+    @classmethod
+    def from_datasheet(
+        cls, rotor_inertia: float, peak_torque: float, electrical_tau: float
+    ) -> "PlantConfig":
+        """Physical model without non-linear stiction."""
+        return cls(
+            rotor_inertia=rotor_inertia,
+            peak_torque=peak_torque,
+            electrical_tau=electrical_tau,
+            viscous_friction=0.01,  # Small default drag
+            static_friction=0.0,
+            disturbance=0.0,
+        )
+
+
 class PlantModel:
     """
     owns plant dynamics
     """
 
-    pass
+    def __init__(self, config: PlantConfig):
+        self.config = config
+        self.torque_prev = 0.0
+        self.velocity = 0.0
+        self.position = 0.0
+
+    def reset(self):
+        self.torque_prev = 0.0
+        self.velocity = 0.0
+        self.position = 0.0
+
+    def step(self, command: float, dt: float):
+        # Apply first-order lag to torque command
+        if self.config.electrical_tau > 0.0:
+            smooth_factor = 1.0 - exp(-dt / self.config.electrical_tau)
+            actual = self.torque_prev + smooth_factor * (command - self.torque_prev)
+        else:
+            actual = command
+
+        # Clamp to peak torque
+        torque = max(-self.config.peak_torque, min(self.config.peak_torque, actual))
+
+        self.torque_prev = torque
+
+        viscous_friction = self.velocity * self.config.viscous_friction
+        net_torque = torque + self.config.disturbance - viscous_friction
+
+        acceleration = net_torque / self.config.rotor_inertia
+
+        self.velocity += acceleration * dt
+        self.position += self.velocity * dt
 
 
 class ProfileGeneratorState(Enum):
